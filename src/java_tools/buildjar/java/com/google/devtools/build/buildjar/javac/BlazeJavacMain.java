@@ -14,8 +14,6 @@
 
 package com.google.devtools.build.buildjar.javac;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -196,7 +194,14 @@ public class BlazeJavacMain {
   private static class ClassloaderMaskingFileManager extends JavacFileManager {
 
     public ClassloaderMaskingFileManager() {
-      super(new Context(), false, UTF_8);
+
+      // Note: Do not set the charset on the file manager -- this prevents the encoding setting
+      //       from taking effect: the base class checks for encoding only if charset is null.
+      //       Instead trust the Bazel's default UTF-8 encoding to be specified in Bazel args.
+      //       Note that the default setting is important, otherwise the base class will fallback
+      //       to system default charset which varies from system to system...  [juhalindfors]
+
+      super(new Context(), false, null /* do not hard-code charset */);
     }
 
     @Override
