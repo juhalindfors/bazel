@@ -162,7 +162,6 @@ public final class ObjcCommon {
     private Iterable<String> defines = ImmutableList.of();
     private Iterable<PathFragment> includes = ImmutableList.of();
     private Iterable<PathFragment> directDependencyIncludes = ImmutableList.of();
-    private Iterable<PathFragment> userHeaderSearchPaths = ImmutableList.of();
     private IntermediateArtifacts intermediateArtifacts;
     private boolean alwayslink;
     private boolean hasModuleMap;
@@ -334,13 +333,6 @@ public final class ObjcCommon {
       return this;
     }
 
-    /** Adds user header search paths to be passed into compile actions with {@code -iquote}. */
-    public Builder addUserHeaderSearchPaths(Iterable<PathFragment> userHeaderSearchPaths) {
-      this.userHeaderSearchPaths =
-          Iterables.concat(this.userHeaderSearchPaths, userHeaderSearchPaths);
-      return this;
-    }
-
     public Builder addDefines(Iterable<String> defines) {
       this.defines = Iterables.concat(this.defines, defines);
       return this;
@@ -423,7 +415,6 @@ public final class ObjcCommon {
                   DYNAMIC_FRAMEWORK_DIR,
                   uniqueContainers(dynamicFrameworkImports, FRAMEWORK_CONTAINER_TYPE))
               .addAll(INCLUDE, includes)
-              .addAll(IQUOTE, userHeaderSearchPaths)
               .add(IQUOTE, buildConfiguration.getGenfilesFragment())
               .addAllForDirectDependents(INCLUDE, directDependencyIncludes)
               .addAll(DEFINE, defines)
@@ -755,7 +746,8 @@ public final class ObjcCommon {
   static Iterable<PathFragment> xcodeStructuredResourceDirs(Iterable<Artifact> artifacts) {
     ImmutableSet.Builder<PathFragment> containers = new ImmutableSet.Builder<>();
     for (Artifact artifact : artifacts) {
-      PathFragment ownerRuleDirectory = artifact.getArtifactOwner().getLabel().getPackageFragment();
+      PathFragment ownerRuleDirectory =
+          artifact.getArtifactOwner().getLabel().getPackageIdentifier().getSourceRoot();
       String containerName =
           artifact.getRootRelativePath().relativeTo(ownerRuleDirectory).getSegment(0);
       PathFragment rootExecPath = artifact.getRoot().getExecPath();

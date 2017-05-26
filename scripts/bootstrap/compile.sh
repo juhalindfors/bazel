@@ -17,7 +17,7 @@
 # Script for building bazel from scratch without bazel
 
 PROTO_FILES=$(ls src/main/protobuf/*.proto src/main/java/com/google/devtools/build/lib/buildeventstream/proto/*.proto)
-LIBRARY_JARS=$(find third_party -name '*.jar' | grep -Fv /javac-9-dev-r3297-4.jar | grep -Fv /javac-9-dev-4023-1.jar | grep -Fv /javac7.jar | grep -Fv JavaBuilder | grep -Fv third_party/guava | grep -Fv third_party/guava | grep -ve third_party/grpc/grpc.*jar | tr "\n" " ")
+LIBRARY_JARS=$(find third_party -name '*.jar' | grep -Fv /javac-9-dev-r3297-4.jar | grep -Fv /javac-9-dev-4023-2.jar | grep -Fv /javac7.jar | grep -Fv JavaBuilder | grep -Fv third_party/guava | grep -Fv third_party/guava | grep -ve third_party/grpc/grpc.*jar | tr "\n" " ")
 GRPC_JAVA_VERSION=0.15.0
 GRPC_LIBRARY_JARS=$(find third_party/grpc -name '*.jar' | grep -e .*${GRPC_JAVA_VERSION}.*jar | tr "\n" " ")
 # Guava jars are different for JDK 7 build and JDK 8 build, we select the good
@@ -164,7 +164,7 @@ the protoc compiler (as we prefer not to version generated files).
   compile.sh on the unpacked archive.
 
 The full install instructions to install a release version of bazel can be found
-at https://bazel.build/versions/master/docs/install.html#compiling-from-source
+at https://bazel.build/versions/master/docs/install-compile-source.html
 For a rationale, why the bootstrap process is organized in this way, see
 https://bazel.build/designs/2016/10/11/distribution-artifact.html
 --------------------------------------------------------------------------------
@@ -325,35 +325,9 @@ function run_bazel_jar() {
   local command=$1
   shift
   local client_env=()
-  # Propagate important environment variables to bootstrapped Bazel.
-  local env_vars="ABI_LIBC_VERSION"
-  env_vars="$env_vars ABI_VERSION"
-  env_vars="$env_vars BAZEL_COMPILER "
-  env_vars="$env_vars BAZEL_HOST_SYSTEM"
-  env_vars="$env_vars BAZEL_PYTHON"
-  env_vars="$env_vars BAZEL_SH"
-  env_vars="$env_vars BAZEL_TARGET_CPU"
-  env_vars="$env_vars BAZEL_TARGET_LIBC"
-  env_vars="$env_vars BAZEL_TARGET_SYSTEM"
-  env_vars="$env_vars BAZEL_VC"
-  env_vars="$env_vars BAZEL_VS"
-  env_vars="$env_vars CC"
-  env_vars="$env_vars CC_TOOLCHAIN_NAME"
-  env_vars="$env_vars CPLUS_INCLUDE_PATH"
-  env_vars="$env_vars CUDA_COMPUTE_CAPABILITIES"
-  env_vars="$env_vars CUDA_PATH"
-  env_vars="$env_vars HOMEBREW_RUBY_PATH"
-  env_vars="$env_vars INCLUDE"
-  env_vars="$env_vars LIB"
-  env_vars="$env_vars NO_WHOLE_ARCHIVE_OPTION"
-  env_vars="$env_vars PATH"
-  env_vars="$env_vars SYSTEMROOT"
-  env_vars="$env_vars TMP"
-  env_vars="$env_vars VS90COMNTOOLS"
-  env_vars="$env_vars VS100COMNTOOLS"
-  env_vars="$env_vars VS110COMNTOOLS"
-  env_vars="$env_vars VS120COMNTOOLS"
-  env_vars="$env_vars VS140COMNTOOLS"
+  # Propagate all environment variables to bootstrapped Bazel.
+  # See https://stackoverflow.com/questions/41898503/loop-over-environment-variables-in-posix-sh
+  local env_vars="$(awk 'END { for (name in ENVIRON) { if(name != "_") print name; } }' </dev/null)"
   for varname in $env_vars; do
     eval value=\$$varname
     if [ "${value}" ]; then

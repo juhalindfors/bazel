@@ -247,6 +247,11 @@ public final class AnalysisTestUtil {
       DummyWorkspaceStatusAction that = (DummyWorkspaceStatusAction) o;
       return that.key.equals(this.key);
     }
+
+    @Override
+    public int hashCode() {
+      return key.hashCode();
+    }
   }
 
   @ExecutionStrategy(contextType = WorkspaceStatusAction.Context.class)

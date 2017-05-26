@@ -1466,17 +1466,10 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
       BuildConfiguration configuration,
       Attribute.Transition transition) {
 
-    if (configuration != null && !configuration.useDynamicConfigurations()
-        && transition != ConfigurationTransition.NONE) {
-      // It's illegal to apply this transition over a statically configured build. But C++ LIPO
-      // support works by applying a rule configurator for static configurations and a rule
-      // transition applier for dynamic configurations. Dynamically configured builds skip
-      // the configurator and this code makes statically configured builds skip the rule transition
-      // applier.
-      //
-      // This will all get a lot simpler once static configurations are removed entirely.
-      transition = ConfigurationTransition.NONE;
-    }
+    Preconditions.checkArgument(configuration == null
+        || configuration.useDynamicConfigurations()
+        || transition == ConfigurationTransition.NONE,
+        "Dynamic configurations required for test configuration using a transition");
 
     if (memoizingEvaluator.getExistingValueForTesting(
         PrecomputedValue.WORKSPACE_STATUS_KEY.getKeyForTesting()) == null) {
@@ -1950,7 +1943,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
   /**
    * A progress received to track analysis invalidation and update progress messages.
    */
-  protected class SkyframeProgressReceiver implements EvaluationProgressReceiver {
+  protected class SkyframeProgressReceiver
+      extends EvaluationProgressReceiver.NullEvaluationProgressReceiver {
     /**
      * This flag is needed in order to avoid invalidating legacy data when we clear the
      * analysis cache because of --discard_analysis_cache flag. For that case we want to keep
@@ -1979,9 +1973,6 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory {
         executionProgressReceiver.enqueueing(skyKey);
       }
     }
-
-    @Override
-    public void computed(SkyKey skyKey, long elapsedTimeNanos) {}
 
     @Override
     public void evaluated(SkyKey skyKey, Supplier<SkyValue> valueSupplier, EvaluationState state) {

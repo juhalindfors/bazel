@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.MakeVariableExpander.ExpansionException;
+import com.google.devtools.build.lib.analysis.MakeVariableSupplier;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -40,6 +41,8 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.rules.AliasProvider;
 import com.google.devtools.build.lib.rules.RuleConfiguredTargetFactory;
+import com.google.devtools.build.lib.rules.cpp.CcCommon.CcFlagsSupplier;
+import com.google.devtools.build.lib.rules.cpp.CcToolchain;
 import com.google.devtools.build.lib.rules.cpp.CppHelper;
 import com.google.devtools.build.lib.rules.java.JavaHelper;
 import com.google.devtools.build.lib.syntax.Type;
@@ -55,7 +58,7 @@ import java.util.regex.Pattern;
 public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
 
   private static final Pattern CROSSTOOL_MAKE_VARIABLE =
-      Pattern.compile("\\$\\((CC|AR|NM|OBJCOPY|STRIP|GCOVTOOL)\\)");
+      Pattern.compile("\\$\\((CC|CC_FLAGS|AR|NM|OBJCOPY|STRIP|GCOVTOOL)\\)");
   private static final Pattern JDK_MAKE_VARIABLE =
       Pattern.compile("\\$\\((JAVABASE|JAVA)\\)");
 
@@ -183,7 +186,7 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
     inputs.addAll(commandHelper.getResolvedTools());
     FilesToRunProvider genruleSetup =
         ruleContext.getPrerequisite("$genrule_setup", Mode.HOST, FilesToRunProvider.class);
-    inputs.addAll(genruleSetup.getFilesToRun());
+    inputs.addTransitive(genruleSetup.getFilesToRun());
     List<String> argv = commandHelper.buildCommandLine(command, inputs, ".genrule_script.sh",
           ImmutableMap.copyOf(executionInfo));
 
@@ -191,7 +194,8 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
     if (requiresCrosstool(baseCommand)) {
       // If cc is used, silently throw in the crosstool filegroup as a dependency.
       inputs.addTransitive(
-          CppHelper.getToolchain(ruleContext, ":cc_toolchain").getCrosstoolMiddleman());
+          CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext)
+              .getCrosstoolMiddleman());
     }
     if (requiresJdk(baseCommand)) {
       // If javac is used, silently throw in the jdk filegroup as a dependency.
@@ -276,7 +280,11 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
    */
   protected CommandResolverContext createCommandResolverContext(RuleContext ruleContext,
       NestedSet<Artifact> resolvedSrcs, NestedSet<Artifact> filesToBuild) {
-    return new CommandResolverContext(ruleContext, resolvedSrcs, filesToBuild);
+    return new CommandResolverContext(
+        ruleContext,
+        resolvedSrcs,
+        filesToBuild,
+        ImmutableList.of(new CcFlagsSupplier(ruleContext)));
   }
 
   /**
@@ -290,16 +298,18 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
     private final NestedSet<Artifact> filesToBuild;
 
     private static final ImmutableList<String> makeVariableAttributes =
-        ImmutableList.of(":cc_toolchain", "toolchains");
+        ImmutableList.of(CcToolchain.CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME, "toolchains");
 
     public CommandResolverContext(
         RuleContext ruleContext,
         NestedSet<Artifact> resolvedSrcs,
-        NestedSet<Artifact> filesToBuild) {
+        NestedSet<Artifact> filesToBuild,
+        Iterable<? extends MakeVariableSupplier> makeVariableSuppliers) {
       super(
           ruleContext.getMakeVariables(makeVariableAttributes),
           ruleContext.getRule().getPackage(),
-          ruleContext.getConfiguration());
+          ruleContext.getConfiguration(),
+          makeVariableSuppliers);
       this.ruleContext = ruleContext;
       this.resolvedSrcs = resolvedSrcs;
       this.filesToBuild = filesToBuild;
@@ -310,16 +320,16 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
     }
 
     @Override
-    public String lookupMakeVariable(String name) throws ExpansionException {
-      if (name.equals("SRCS")) {
+    public String lookupMakeVariable(String variableName) throws ExpansionException {
+      if (variableName.equals("SRCS")) {
         return Artifact.joinExecPaths(" ", resolvedSrcs);
-      } else if (name.equals("<")) {
+      } else if (variableName.equals("<")) {
         return expandSingletonArtifact(resolvedSrcs, "$<", "input file");
-      } else if (name.equals("OUTS")) {
+      } else if (variableName.equals("OUTS")) {
         return Artifact.joinExecPaths(" ", filesToBuild);
-      } else if (name.equals("@")) {
+      } else if (variableName.equals("@")) {
         return expandSingletonArtifact(filesToBuild, "$@", "output file");
-      } else if (name.equals("@D")) {
+      } else if (variableName.equals("@D")) {
         // The output directory. If there is only one filename in outs,
         // this expands to the directory containing that file. If there are
         // multiple filenames, this variable instead expands to the
@@ -346,14 +356,14 @@ public abstract class GenRuleBase implements RuleConfiguredTargetFactory {
               ruleContext.getRule().getLabel().getPackageIdentifier().getSourceRoot();
           return dir.getRelative(relPath).getPathString();
         }
-      } else if (JDK_MAKE_VARIABLE.matcher("$(" + name + ")").find()) {
+      } else if (JDK_MAKE_VARIABLE.matcher("$(" + variableName + ")").find()) {
         return new ConfigurationMakeVariableContext(
                 ruleContext.getMakeVariables(makeVariableAttributes),
                 ruleContext.getTarget().getPackage(),
                 ruleContext.getHostConfiguration())
-            .lookupMakeVariable(name);
+            .lookupMakeVariable(variableName);
       } else {
-        return super.lookupMakeVariable(name);
+        return super.lookupMakeVariable(variableName);
       }
     }
 

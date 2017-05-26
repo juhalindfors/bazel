@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -395,6 +396,7 @@ public final class ParallelEvaluator implements Evaluator {
         long startTime = BlazeClock.instance().nanoTime();
         try {
           try {
+            evaluatorContext.getProgressReceiver().computing(skyKey);
             value = factory.compute(skyKey, env);
           } finally {
             long elapsedTimeNanos = BlazeClock.instance().nanoTime() - startTime;
@@ -628,8 +630,13 @@ public final class ParallelEvaluator implements Evaluator {
       Set<SkyKey> oldDeps,
       SkyFunctionEnvironment env)
       throws InterruptedException {
+    Iterator<SkyKey> it = env.getNewlyRequestedDeps().iterator();
+    if (!it.hasNext()) {
+      return;
+    }
     Set<SkyKey> unfinishedDeps = new HashSet<>();
-    for (SkyKey dep : env.getNewlyRequestedDeps()) {
+    while (it.hasNext()) {
+      SkyKey dep = it.next();
       if (!isDoneForBuild(newlyRequestedDepMap.get(dep))) {
         unfinishedDeps.add(dep);
       }

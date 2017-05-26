@@ -40,7 +40,7 @@ java_library(
         "//third_party:auto_value",
         "//third_party:guava",
         "//third_party:jsr305",
-        "//third_party/java/jdk/langtools:javac-9-dev-r4023-1",
+        "//third_party/java/jdk/langtools:javac",
     ],
 )
 
@@ -71,7 +71,7 @@ java_library(
         "//src/main/protobuf:worker_protocol_java_proto",
         "//third_party:guava",
         "//third_party/java/jacoco:core",
-        "//third_party/java/jdk/langtools:javac-9-dev-r4023-1",
+        "//third_party/java/jdk/langtools:javac",
     ],
 )
 
@@ -130,12 +130,12 @@ bootstrap_java_library(
     name = "skylark-deps",
     jars = [
         "//third_party:auto_value-jars",
-        "//third_party:bootstrap_guava_and_error_prone-jars-2.0.20-SNAPSHOT",
+        "//third_party:bootstrap_guava_and_error_prone-jars",
         "//third_party:jsr305-jars",
         "//third_party/protobuf:protobuf-jars",
         "//third_party/java/jacoco:core-jars",
     ],
-    neverlink_jars = ["//third_party/java/jdk/langtools:javac_jar-9-dev-r4023-1"],
+    neverlink_jars = ["//third_party/java/jdk/langtools:javac_jar"],
     srcjars = [
         "//src/main/protobuf:deps_java_proto_srcjar",
         "//src/main/protobuf:worker_protocol_java_proto_srcjar",
@@ -172,7 +172,7 @@ bootstrap_java_library(
     jars = [
         "//third_party:jsr305-jars",
         "//third_party:auto_value-jars",
-        "//third_party:bootstrap_guava_and_error_prone-jars-2.0.20-SNAPSHOT",
+        "//third_party:bootstrap_guava_and_error_prone-jars",
     ],
 )
 
@@ -189,7 +189,6 @@ bootstrap_java_binary(
     deps = [
         ":skylark-deps",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper:bootstrap_jarhelper",
-        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/resourcejar:bootstrap_resourcejar",
     ],
 )
 
@@ -206,7 +205,6 @@ java_library(
         ":javac_options",
         ":optionsparser",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper",
-        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/resourcejar",
         "//src/main/protobuf:deps_java_proto",
         "//src/main/protobuf:java_compilation_java_proto",
         "//src/main/protobuf:worker_protocol_java_proto",
@@ -219,7 +217,6 @@ filegroup(
     srcs = glob(["**"]) + [
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/genclass:srcs",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/jarhelper:srcs",
-        "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/resourcejar:srcs",
         "//src/java_tools/buildjar/java/com/google/devtools/build/buildjar/javac/plugins:srcs",
     ],
     visibility = ["//src/java_tools/buildjar:__pkg__"],

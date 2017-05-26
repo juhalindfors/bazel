@@ -200,8 +200,6 @@ toolchain {
   compiler_flag: "/Gy"
   # Use string pooling.
   compiler_flag: "/GF"
-  # Warning level 3 (could possibly go to 4 in the future).
-  compiler_flag: "/W3"
   # Catch both asynchronous (structured) and synchronous (C++) exceptions.
   compiler_flag: "/EHsc"
 
@@ -713,6 +711,50 @@ toolchain {
   }
 
   feature {
+    name: 'link_crt_library'
+    flag_set {
+      action: 'c-compile'
+      action: 'c++-compile'
+      flag_group {
+        # The flag is filled by cc_configure.
+        # The default option is /MT, set USE_DYNAMIC_CRT=1 to change it to /MD
+        flag: "%{crt_option}"
+      }
+    }
+    flag_set {
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+      # The flag is filled by cc_configure.
+        # The default value is libcmt.lib, set USE_DYNAMIC_CRT=1 to change it to msvcrt.lib
+        flag: "/DEFAULTLIB:%{crt_library}"
+      }
+    }
+  }
+
+  feature {
+    name: 'link_crt_debug_library'
+    flag_set {
+      action: 'c-compile'
+      action: 'c++-compile'
+      flag_group {
+        # The flag is filled by cc_configure.
+        # The default option is /MTd, set USE_DYNAMIC_CRT=1 to change it to /MDd
+        flag: "%{crt_debug_option}"
+      }
+    }
+    flag_set {
+      action: 'c++-link-executable'
+      action: 'c++-link-dynamic-library'
+      flag_group {
+        # The flag is filled by cc_configure.
+        # The default value is libcmtd.lib, set USE_DYNAMIC_CRT=1 to change it to msvcrtd.lib
+        flag: "/DEFAULTLIB:%{crt_debug_library}"
+      }
+    }
+  }
+
+  feature {
     name: 'dbg'
     flag_set {
       action: 'c-compile'
@@ -734,6 +776,7 @@ toolchain {
         flag: "/INCREMENTAL:NO"
       }
     }
+    implies: 'link_crt_debug_library'
     implies: 'generate_pdb_file'
   }
 
@@ -755,6 +798,7 @@ toolchain {
         flag: "/INCREMENTAL:NO"
       }
     }
+    implies: 'link_crt_library'
     implies: 'generate_pdb_file'
   }
 
@@ -767,6 +811,7 @@ toolchain {
         flag: "/O2"
       }
     }
+    implies: 'link_crt_library'
   }
 
   compilation_mode_flags {

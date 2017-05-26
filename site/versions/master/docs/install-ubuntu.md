@@ -15,7 +15,7 @@ Install Bazel on Ubuntu using one of the following methods:
 
 *   [Use our custom APT repository (recommended)](#install-on-ubuntu)
 *   [Use the binary installer](#install-with-installer-ubuntu)
-*   [Compile Bazel from source](#install-compile-source.md)
+*   [Compile Bazel from source](install-compile-source.md)
 
 Bazel comes with two completion scripts. After installing Bazel, you can:
 
@@ -40,7 +40,7 @@ want to install the testing version of Bazel, replace `stable` with `testing`.
 sudo apt-get update && sudo apt-get install bazel
 ```
 
-Once installed, you can upgrade to newer version of Bazel with:
+Once installed, you can upgrade to a newer version of Bazel with:
 
 ```bash
 sudo apt-get upgrade bazel

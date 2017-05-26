@@ -476,6 +476,16 @@ public class BuildView {
     List<TargetAndConfiguration> topLevelTargetsWithConfigs =
         nodesForTopLevelTargets(configurations, targets, eventHandler);
 
+    // Report the generated association of targets to configurations
+    Multimap<Label, BuildConfiguration> byLabel =
+        ArrayListMultimap.<Label, BuildConfiguration>create();
+    for (TargetAndConfiguration pair : topLevelTargetsWithConfigs) {
+      byLabel.put(pair.getLabel(), pair.getConfiguration());
+    }
+    for (Label label : byLabel.keySet()) {
+      eventBus.post(new TargetConfiguredEvent(label, byLabel.get(label)));
+    }
+
     List<ConfiguredTargetKey> topLevelCtKeys = Lists.transform(topLevelTargetsWithConfigs,
         new Function<TargetAndConfiguration, ConfiguredTargetKey>() {
           @Override
@@ -483,6 +493,7 @@ public class BuildView {
             return new ConfiguredTargetKey(node.getLabel(), node.getConfiguration());
           }
         });
+
 
     List<AspectValueKey> aspectKeys = new ArrayList<>();
     for (String aspect : aspects) {
@@ -511,9 +522,6 @@ public class BuildView {
 
         String skylarkFunctionName = aspect.substring(delimiterPosition + 1);
         for (TargetAndConfiguration targetSpec : topLevelTargetsWithConfigs) {
-          if (!(targetSpec.getTarget() instanceof Rule)) {
-            continue;
-          }
           aspectKeys.add(
               AspectValue.createSkylarkAspectKey(
                   targetSpec.getLabel(),
@@ -529,12 +537,7 @@ public class BuildView {
             ruleClassProvider.getNativeAspectClassMap().get(aspect);
 
         if (aspectFactoryClass != null) {
-          AspectParameters aspectParameters = AspectParameters.EMPTY;
-          boolean applyToFiles = aspectFactoryClass.getDefinition(aspectParameters).applyToFiles();
           for (TargetAndConfiguration targetSpec : topLevelTargetsWithConfigs) {
-            if (!applyToFiles && !(targetSpec.getTarget() instanceof Rule)) {
-              continue;
-            }
             // For invoking top-level aspects, use the top-level configuration for both the
             // aspect and the base target while the top-level configuration is untrimmed.
             BuildConfiguration configuration = targetSpec.getConfiguration();
@@ -542,7 +545,7 @@ public class BuildView {
                 AspectValue.createAspectKey(
                     targetSpec.getLabel(),
                     configuration,
-                    new AspectDescriptor(aspectFactoryClass, aspectParameters),
+                    new AspectDescriptor(aspectFactoryClass, AspectParameters.EMPTY),
                     configuration
                 ));
           }

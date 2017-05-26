@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.sandbox;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionStatusMessage;
@@ -22,9 +23,10 @@ import com.google.devtools.build.lib.actions.ExecutionStrategy;
 import com.google.devtools.build.lib.actions.Executor;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnActionContext;
-import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.exec.SpawnInputExpander;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
+import com.google.devtools.build.lib.standalone.StandaloneSpawnStrategy;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -38,28 +40,34 @@ import java.util.concurrent.atomic.AtomicReference;
   contextType = SpawnActionContext.class
 )
 public class ProcessWrapperSandboxedStrategy extends SandboxStrategy {
-  public static boolean isSupported(CommandEnvironment env) {
-    return ProcessWrapperRunner.isSupported(env);
+
+  public static boolean isSupported(CommandEnvironment cmdEnv) {
+    return ProcessWrapperRunner.isSupported(cmdEnv);
   }
 
   private final SandboxOptions sandboxOptions;
   private final Path execRoot;
   private final boolean verboseFailures;
+  private final String productName;
+  private final SpawnInputExpander spawnInputExpander;
 
   ProcessWrapperSandboxedStrategy(
+      CommandEnvironment cmdEnv,
       BuildRequest buildRequest,
-      BlazeDirectories blazeDirs,
       Path sandboxBase,
-      boolean verboseFailures) {
+      boolean verboseFailures,
+      String productName) {
     super(
+        cmdEnv,
         buildRequest,
-        blazeDirs,
         sandboxBase,
         verboseFailures,
         buildRequest.getOptions(SandboxOptions.class));
     this.sandboxOptions = buildRequest.getOptions(SandboxOptions.class);
-    this.execRoot = blazeDirs.getExecRoot();
+    this.execRoot = cmdEnv.getExecRoot();
     this.verboseFailures = verboseFailures;
+    this.productName = productName;
+    this.spawnInputExpander = new SpawnInputExpander(false);
   }
 
   @Override
@@ -80,18 +88,24 @@ public class ProcessWrapperSandboxedStrategy extends SandboxStrategy {
     Path sandboxPath = getSandboxRoot();
     Path sandboxExecRoot = sandboxPath.getRelative("execroot").getRelative(execRoot.getBaseName());
 
+    ImmutableMap<String, String> spawnEnvironment =
+        StandaloneSpawnStrategy.locallyDeterminedEnv(execRoot, productName, spawn.getEnvironment());
+
     Set<Path> writableDirs = getWritableDirs(sandboxExecRoot, spawn.getEnvironment());
     SymlinkedExecRoot symlinkedExecRoot = new SymlinkedExecRoot(sandboxExecRoot);
     ImmutableSet<PathFragment> outputs = SandboxHelpers.getOutputFiles(spawn);
     symlinkedExecRoot.createFileSystem(
-        getMounts(spawn, actionExecutionContext), outputs, writableDirs);
+        SandboxHelpers.getInputFiles(
+            spawnInputExpander, this.execRoot, spawn, actionExecutionContext),
+        outputs,
+        writableDirs);
 
-    SandboxRunner runner = new ProcessWrapperRunner(execRoot, sandboxExecRoot, verboseFailures);
+    SandboxRunner runner = new ProcessWrapperRunner(sandboxExecRoot, verboseFailures);
     try {
       runSpawn(
           spawn,
           actionExecutionContext,
-          spawn.getEnvironment(),
+          spawnEnvironment,
           symlinkedExecRoot,
           outputs,
           runner,

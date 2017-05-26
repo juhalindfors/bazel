@@ -42,6 +42,11 @@ import com.google.devtools.build.lib.analysis.Dependency;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection.Transitions;
+import com.google.devtools.build.lib.buildeventstream.BuildEvent;
+import com.google.devtools.build.lib.buildeventstream.BuildEventConverters;
+import com.google.devtools.build.lib.buildeventstream.BuildEventId;
+import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
+import com.google.devtools.build.lib.buildeventstream.GenericBuildEvent;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
@@ -119,7 +124,7 @@ import javax.annotation.Nullable;
     category = SkylarkModuleCategory.BUILTIN,
     doc = "Data required for the analysis of a target that comes from targets that "
         + "depend on it and not targets that it depends on.")
-public final class BuildConfiguration {
+public final class BuildConfiguration implements BuildEvent {
   /**
    * An interface for language-specific configurations.
    *
@@ -199,18 +204,6 @@ public final class BuildConfiguration {
      */
     public boolean compatibleWithStrategy(String strategyName) {
       return true;
-    }
-
-    /**
-     * Returns the transition that produces the "artifact owner" for this configuration, or null
-     * if this configuration is its own owner.
-     *
-     * <p>If multiple fragments return the same transition, that transition is only applied
-     * once. Multiple fragments may not return different non-null transitions.
-     */
-    @Nullable
-    public PatchTransition getArtifactOwnerTransition() {
-      return null;
     }
 
     /**
@@ -1144,6 +1137,7 @@ public final class BuildConfiguration {
 
   private final ImmutableMap<Class<? extends Fragment>, Fragment> fragments;
   private final ImmutableMap<String, Class<? extends Fragment>> skylarkVisibleFragments;
+  private final RepositoryName mainRepositoryName;
 
 
   /**
@@ -1214,21 +1208,21 @@ public final class BuildConfiguration {
     }
 
     Root getRoot(
-        RepositoryName repositoryName, String outputDirName, BlazeDirectories directories) {
+        RepositoryName repositoryName, String outputDirName, BlazeDirectories directories,
+        RepositoryName mainRepositoryName) {
       // e.g., execroot/repo1
-      Path execRoot = directories.getExecRoot();
+      Path execRoot = directories.getExecRoot(mainRepositoryName.strippedName());
       // e.g., execroot/repo1/bazel-out/config/bin
       Path outputDir = execRoot.getRelative(directories.getRelativeOutputPath())
           .getRelative(outputDirName);
       if (middleman) {
-        return INTERNER.intern(Root.middlemanRoot(execRoot, outputDir, repositoryName.isMain()));
+        return INTERNER.intern(Root.middlemanRoot(execRoot, outputDir,
+            repositoryName.equals(mainRepositoryName)));
       }
       // e.g., [[execroot/repo1]/bazel-out/config/bin]
       return INTERNER.intern(
-          Root.asDerivedRoot(
-              execRoot,
-              outputDir.getRelative(nameFragment),
-              repositoryName.isMain()));
+          Root.asDerivedRoot(execRoot, outputDir.getRelative(nameFragment),
+              repositoryName.equals(mainRepositoryName)));
     }
   }
 
@@ -1453,7 +1447,8 @@ public final class BuildConfiguration {
    */
   public BuildConfiguration(BlazeDirectories directories,
       Map<Class<? extends Fragment>, Fragment> fragmentsMap,
-      BuildOptions buildOptions) {
+      BuildOptions buildOptions,
+      String repositoryName) {
     this.directories = directories;
     this.fragments = ImmutableSortedMap.copyOf(fragmentsMap, lexicalFragmentSorter);
 
@@ -1462,6 +1457,7 @@ public final class BuildConfiguration {
     this.buildOptions = buildOptions.clone();
     this.actionsEnabled = buildOptions.enableActions();
     this.options = buildOptions.get(Options.class);
+    this.mainRepositoryName = RepositoryName.createFromValidStrippedName(repositoryName);
 
     Map<String, String> testEnv = new TreeMap<>();
     for (Map.Entry<String, String> entry : this.options.testEnvironment) {
@@ -1486,19 +1482,26 @@ public final class BuildConfiguration {
         ? options.outputDirectoryName : mnemonic;
 
     this.outputDirectoryForMainRepository =
-        OutputDirectory.OUTPUT.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.OUTPUT.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
     this.binDirectoryForMainRepository =
-        OutputDirectory.BIN.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.BIN.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
     this.includeDirectoryForMainRepository =
-        OutputDirectory.INCLUDE.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.INCLUDE.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
     this.genfilesDirectoryForMainRepository =
-        OutputDirectory.GENFILES.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.GENFILES.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
     this.coverageDirectoryForMainRepository =
-        OutputDirectory.COVERAGE.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.COVERAGE.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
     this.testlogsDirectoryForMainRepository =
-        OutputDirectory.TESTLOGS.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.TESTLOGS.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
     this.middlemanDirectoryForMainRepository =
-        OutputDirectory.MIDDLEMAN.getRoot(RepositoryName.MAIN, outputDirName, directories);
+        OutputDirectory.MIDDLEMAN.getRoot(
+            RepositoryName.MAIN, outputDirName, directories, mainRepositoryName);
 
     this.platformName = buildPlatformName();
 
@@ -1547,8 +1550,8 @@ public final class BuildConfiguration {
     }
     BuildOptions options = buildOptions.trim(
         getOptionsClasses(fragmentsMap.keySet(), ruleClassProvider));
-    BuildConfiguration newConfig =
-        new BuildConfiguration(directories, fragmentsMap, options);
+    BuildConfiguration newConfig = new BuildConfiguration(
+        directories, fragmentsMap, options, mainRepositoryName.strippedName());
     newConfig.setConfigurationTransitions(this.transitions);
     return newConfig;
   }
@@ -1994,21 +1997,16 @@ public final class BuildConfiguration {
           if (currentTransition == ConfigurationTransition.NONE) {
             currentTransition = ruleClassTransition;
           } else {
-            currentTransition = new ComposingSplitTransition(currentTransition,
-                ruleClassTransition);
+            currentTransition = new ComposingSplitTransition(ruleClassTransition,
+                currentTransition);
           }
         }
       }
 
-      /**
-       * Dynamic configurations don't support rule class configurators (which may need intermediate
-       * configurations to apply). The only current use of that is LIPO, which dynamic
-       * configurations have a different code path for:
-       * {@link com.google.devtools.build.lib.rules.cpp.CppRuleClasses.LIPO_ON_DEMAND}.
-       *
-       * So just check that if there is a configurator, it's for LIPO, in which case we can ignore
-       * it.
-       */
+      // We don't support rule class configurators (which may need intermediate configurations to
+      // apply). The only current use of that is LIPO, which can't currently be invoked with dynamic
+      // configurations (e.g. this code can never get called for LIPO builds). So check that
+      // if there is a configurator, it's for LIPO, in which case we can ignore it.
       if (associatedRule != null) {
         @SuppressWarnings("unchecked")
         RuleClass.Configurator<?, ?> func =
@@ -2129,9 +2127,10 @@ public final class BuildConfiguration {
    * Returns the output directory for this build configuration.
    */
   public Root getOutputDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? outputDirectoryForMainRepository
-        : OutputDirectory.OUTPUT.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.OUTPUT.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   /**
@@ -2150,9 +2149,10 @@ public final class BuildConfiguration {
    * repositories (external) but will need to be fixed.
    */
   public Root getBinDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? binDirectoryForMainRepository
-        : OutputDirectory.BIN.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.BIN.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   /**
@@ -2166,9 +2166,10 @@ public final class BuildConfiguration {
    * Returns the include directory for this build configuration.
    */
   public Root getIncludeDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? includeDirectoryForMainRepository
-        : OutputDirectory.INCLUDE.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.INCLUDE.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   /**
@@ -2181,9 +2182,10 @@ public final class BuildConfiguration {
   }
 
   public Root getGenfilesDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? genfilesDirectoryForMainRepository
-        : OutputDirectory.GENFILES.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.GENFILES.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   /**
@@ -2192,18 +2194,20 @@ public final class BuildConfiguration {
    * needed for Jacoco's coverage reporting tools.
    */
   public Root getCoverageMetadataDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? coverageDirectoryForMainRepository
-        : OutputDirectory.COVERAGE.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.COVERAGE.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   /**
    * Returns the testlogs directory for this build configuration.
    */
   public Root getTestLogsDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? testlogsDirectoryForMainRepository
-        : OutputDirectory.TESTLOGS.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.TESTLOGS.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   /**
@@ -2230,9 +2234,10 @@ public final class BuildConfiguration {
    * Returns the internal directory (used for middlemen) for this build configuration.
    */
   public Root getMiddlemanDirectory(RepositoryName repositoryName) {
-    return repositoryName.equals(RepositoryName.MAIN)
+    return repositoryName.isMain() || repositoryName.equals(mainRepositoryName)
         ? middlemanDirectoryForMainRepository
-        : OutputDirectory.MIDDLEMAN.getRoot(repositoryName, outputDirName, directories);
+        : OutputDirectory.MIDDLEMAN.getRoot(
+            repositoryName, outputDirName, directories, mainRepositoryName);
   }
 
   public boolean getAllowRuntimeDepsOnNeverLink() {
@@ -2245,6 +2250,10 @@ public final class BuildConfiguration {
 
   public List<Label> getPlugins() {
     return options.pluginList;
+  }
+
+  public String getMainRepositoryName() {
+    return mainRepositoryName.strippedName();
   }
 
   /**
@@ -2347,14 +2356,14 @@ public final class BuildConfiguration {
    * (Fragments, in particular the Google C++ support, can set variables through the
    * command line.)
    */
-  public Map<String, String> getCommandLineBuildVariables() {
+  public ImmutableMap<String, String> getCommandLineBuildVariables() {
     return commandLineBuildVariables;
   }
 
   /**
    * Returns the global defaults for this configuration for the Make environment.
    */
-  public Map<String, String> getGlobalMakeEnvironment() {
+  public ImmutableMap<String, String> getGlobalMakeEnvironment() {
     return globalMakeEnv;
   }
 
@@ -2637,38 +2646,15 @@ public final class BuildConfiguration {
   }
 
   /**
-   * Returns the transition that produces the "artifact owner" for this configuration, or null
-   * if this configuration is its own owner.
-   *
-   * <p>This is the dynamic configuration version of {@link #getArtifactOwnerConfiguration}.
-   */
-  @Nullable
-  public PatchTransition getArtifactOwnerTransition() {
-    Preconditions.checkState(useDynamicConfigurations());
-    PatchTransition ownerTransition = null;
-    for (Fragment fragment : fragments.values()) {
-      PatchTransition fragmentTransition = fragment.getArtifactOwnerTransition();
-      if (fragmentTransition != null) {
-        if (ownerTransition != null) {
-          Verify.verify(ownerTransition == fragmentTransition,
-              String.format(
-                  "cannot determine owner transition: fragments returning both %s and %s",
-                  ownerTransition.toString(), fragmentTransition.toString()));
-        }
-        ownerTransition = fragmentTransition;
-      }
-    }
-    return ownerTransition;
-  }
-
-  /**
    * See {@code BuildConfigurationCollection.Transitions.getArtifactOwnerConfiguration()}.
-   *
-   * <p>This is the static configuration version of {@link #getArtifactOwnerTransition}.
    */
   public BuildConfiguration getArtifactOwnerConfiguration() {
-    Preconditions.checkState(!useDynamicConfigurations());
-    return transitions.getArtifactOwnerConfiguration();
+    // Dynamic configurations inherit transitions objects from other configurations exclusively
+    // for use of Transitions.getDynamicTransition. No other calls to transitions should be
+    // made for dynamic configurations.
+    // TODO(bazel-team): enforce the above automatically (without having to explicitly check
+    // for dynamic configuration mode).
+    return useDynamicConfigurations() ? this : transitions.getArtifactOwnerConfiguration();
   }
 
   /**
@@ -2712,5 +2698,27 @@ public final class BuildConfiguration {
       }
     }
     return currentTransition;
+  }
+
+  @Override
+  public BuildEventId getEventId() {
+    return BuildEventId.configurationId(checksum());
+  }
+
+  @Override
+  public Collection<BuildEventId> getChildrenEvents() {
+    return ImmutableList.of();
+  }
+
+  @Override
+  public BuildEventStreamProtos.BuildEvent asStreamProto(BuildEventConverters converters) {
+    return GenericBuildEvent.protoChaining(this)
+        .setConfiguration(
+            BuildEventStreamProtos.Configuration.newBuilder()
+                .setMnemonic(getMnemonic())
+                .setPlatformName(getPlatformName())
+                .setCpu(getCpu())
+                .build())
+        .build();
   }
 }

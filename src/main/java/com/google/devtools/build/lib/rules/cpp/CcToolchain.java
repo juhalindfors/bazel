@@ -36,6 +36,7 @@ import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
+import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -61,6 +62,9 @@ import java.util.Map;
  * Implementation for the cc_toolchain rule.
  */
 public class CcToolchain implements RuleConfiguredTargetFactory {
+
+  /** Default attribute name where rules store the reference to cc_toolchain */
+  public static final String CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME = ":cc_toolchain";
 
   /**
    * This file (found under the sysroot) may be unconditionally included in every C/C++ compilation.
@@ -284,6 +288,15 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
       coverage = crosstool;
     }
 
+    PathFragment sysroot = calculateSysroot(ruleContext);
+
+    ImmutableList<PathFragment> builtInIncludeDirectories = null;
+    try {
+      builtInIncludeDirectories = cppConfiguration.getBuiltInIncludeDirectories(sysroot);
+    } catch (InvalidConfigurationException e) {
+      ruleContext.ruleError(e.getMessage());
+    }
+
     CcToolchainProvider ccProvider =
         new CcToolchainProvider(
             cppConfiguration,
@@ -310,9 +323,8 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
             coverageEnvironment.build(),
             ruleContext.getPrerequisiteArtifact("$link_dynamic_library_tool", Mode.HOST),
             getEnvironment(ruleContext),
-            cppConfiguration.getBuiltInIncludeDirectories());
-
-    PathFragment sysroot = cppConfiguration.getSysroot();
+            builtInIncludeDirectories,
+            sysroot);
 
     MakeVariableProvider makeVariableProvider =
         createMakeVariableProvider(cppConfiguration, sysroot);
@@ -376,7 +388,7 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
   }
 
   private NestedSet<Artifact> inputsForLibc(RuleContext ruleContext) {
-    TransitiveInfoCollection libc = ruleContext.getPrerequisite(":libc_top", Mode.HOST);
+    TransitiveInfoCollection libc = ruleContext.getPrerequisite(":libc_top", Mode.TARGET);
     return libc != null
         ? libc.getProvider(FileProvider.class).getFilesToBuild()
         : NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER);
@@ -386,7 +398,7 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
       NestedSet<Artifact> crosstoolMiddleman) {
     return NestedSetBuilder.<Artifact>stableOrder()
         .addTransitive(crosstoolMiddleman)
-        .addTransitive(AnalysisUtils.getMiddlemanFor(ruleContext, ":libc_top"))
+        .addTransitive(AnalysisUtils.getMiddlemanFor(ruleContext, ":libc_top", Mode.TARGET))
         .build();
   }
 
@@ -398,7 +410,7 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
       RuleContext ruleContext, NestedSet<Artifact> link) {
     return NestedSetBuilder.<Artifact>stableOrder()
         .addTransitive(link)
-        .addTransitive(AnalysisUtils.getMiddlemanFor(ruleContext, ":libc_top"))
+        .addTransitive(AnalysisUtils.getMiddlemanFor(ruleContext, ":libc_top", Mode.TARGET))
         .add(ruleContext.getPrerequisiteArtifact("$interface_library_builder", Mode.HOST))
         .add(ruleContext.getPrerequisiteArtifact("$link_dynamic_library_tool", Mode.HOST))
         .build();
@@ -452,9 +464,9 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
     // Overwrite the CC_FLAGS variable to include sysroot, if it's available.
     if (sysroot != null) {
       String sysrootFlag = "--sysroot=" + sysroot;
-      String ccFlags = makeVariables.get("CC_FLAGS");
+      String ccFlags = makeVariables.get(CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME);
       ccFlags = ccFlags.isEmpty() ? sysrootFlag : ccFlags + " " + sysrootFlag;
-      makeVariables.put("CC_FLAGS", ccFlags);
+      makeVariables.put(CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME, ccFlags);
     }
     return new MakeVariableProvider(ImmutableMap.copyOf(makeVariables));
   }
@@ -480,5 +492,17 @@ public class CcToolchain implements RuleConfiguredTargetFactory {
    */
   protected ImmutableMap<String, String> getEnvironment(RuleContext ruleContext) {
     return ImmutableMap.<String, String>of();
+  }
+
+  private PathFragment calculateSysroot(RuleContext ruleContext) {
+
+    TransitiveInfoCollection sysrootTarget = ruleContext.getPrerequisite(":libc_top", Mode.TARGET);
+    if (sysrootTarget == null) {
+      CppConfiguration cppConfiguration =
+          Preconditions.checkNotNull(ruleContext.getFragment(CppConfiguration.class));
+      return cppConfiguration.getDefaultSysroot();
+    }
+
+    return sysrootTarget.getLabel().getPackageFragment();
   }
 }

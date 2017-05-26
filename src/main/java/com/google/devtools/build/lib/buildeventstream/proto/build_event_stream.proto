@@ -100,6 +100,9 @@ message BuildEventId {
   message TargetCompletedId {
     string label = 1;
 
+    // The configuration for wich the target was built.
+    ConfigurationId configuration = 3;
+
     // If not empty, the id refers to the completion of the target for a given
     // aspect.
     string aspect = 2;
@@ -119,6 +122,7 @@ message BuildEventId {
   // starting with 1.
   message TestResultId {
     string label = 1;
+    ConfigurationId configuration = 5;
     int32 run = 2;
     int32 shard = 3;
     int32 attempt = 4;
@@ -127,6 +131,7 @@ message BuildEventId {
   // Identifier of an event reporting the summary of a test.
   message TestSummaryId {
     string label = 1;
+    ConfigurationId configuration = 2;
   }
 
   // Identifier of the BuildFinished event, indicating the end of a build.
@@ -357,7 +362,7 @@ message TargetComplete {
   // Temporarily, also report the important outputs directly. This is only to
   // allow existing clients help transition to the deduplicated representation;
   // new clients should not use it.
-  repeated File important_output = 4;
+  repeated File important_output = 4 [deprecated = true];
 
   // List of tags associated with this target.
   repeated string tag = 3;

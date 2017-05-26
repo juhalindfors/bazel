@@ -113,6 +113,7 @@ public class ObjcCompileAction extends SpawnAction {
       Iterable<Artifact> outputs,
       ResourceSet resourceSet,
       CommandLine argv,
+      boolean isShellCommand,
       ImmutableMap<String, String> environment,
       ImmutableMap<String, String> executionInfo,
       String progressMessage,
@@ -133,6 +134,7 @@ public class ObjcCompileAction extends SpawnAction {
         outputs,
         resourceSet,
         argv,
+        isShellCommand,
         environment,
         ImmutableSet.<String>of(),
         executionInfo,
@@ -351,6 +353,13 @@ public class ObjcCompileAction extends SpawnAction {
       return this;
     }
 
+    @Override
+    public Builder addTransitiveTools(NestedSet<Artifact> artifacts) {
+      super.addTransitiveTools(artifacts);
+      mandatoryInputs.addTransitive(artifacts);
+      return this;
+    }
+
     /** Sets a .d file that will used to prune input headers */
     public Builder setDotdFile(DotdFile dotdFile) {
       Preconditions.checkNotNull(dotdFile);
@@ -431,6 +440,7 @@ public class ObjcCompileAction extends SpawnAction {
         ImmutableList<Artifact> outputs,
         ResourceSet resourceSet,
         CommandLine actualCommandLine,
+        boolean isShellCommand,
         ImmutableMap<String, String> env,
         ImmutableSet<String> clientEnvironmentVariables,
         ImmutableMap<String, String> executionInfo,
@@ -444,6 +454,7 @@ public class ObjcCompileAction extends SpawnAction {
           outputs,
           resourceSet,
           actualCommandLine,
+          isShellCommand,
           env,
           executionInfo,
           progressMessage,

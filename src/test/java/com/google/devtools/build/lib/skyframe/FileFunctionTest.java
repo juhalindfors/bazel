@@ -157,7 +157,7 @@ public class FileFunctionTest {
                     SkyFunctions.WORKSPACE_FILE,
                     new WorkspaceFileFunction(
                         TestRuleClassProvider.getRuleClassProvider(),
-                        TestConstants.PACKAGE_FACTORY_FACTORY_FOR_TESTING.create(
+                        TestConstants.PACKAGE_FACTORY_BUILDER_FACTORY_FOR_TESTING.builder().build(
                             TestRuleClassProvider.getRuleClassProvider(), fs),
                         directories))
                 .put(SkyFunctions.EXTERNAL_PACKAGE, new ExternalPackageFunction())
@@ -558,13 +558,15 @@ public class FileFunctionTest {
   }
 
   @Test
-  public void testSymlinkTargetContentsChangeModTime() throws Exception {
+  public void testSymlinkTargetContentsChangeCTime() throws Exception {
     fastDigest = false;
     Path fooPath = file("foo");
     FileSystemUtils.writeContentAsLatin1(fooPath, "foo");
     Path p = symlink("symlink", "foo");
     FileValue a = valueForPath(p);
-    fooPath.setLastModifiedTime(88);
+    manualClock.advanceMillis(1);
+    fooPath.chmod(0555);
+    manualClock.advanceMillis(1);
     FileValue b = valueForPath(p);
     assertThat(b).isNotEqualTo(a);
   }

@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.pkgcache;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -37,6 +36,7 @@ import com.google.devtools.build.lib.packages.BuildFileContainsErrorsException;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.Package;
+import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.skyframe.DiffAwareness;
@@ -77,15 +77,22 @@ public class PackageCacheTest extends FoundationTestCase {
 
   @Before
   public final void initializeSkyframeExecutor() throws Exception {
+    initializeSkyframeExecutor(/*doPackageLoadingChecks=*/ true);
+  }
+
+  private void initializeSkyframeExecutor(boolean doPackageLoadingChecks) throws Exception {
     analysisMock = AnalysisMock.get();
     ruleClassProvider = analysisMock.createRuleClassProvider();
     BlazeDirectories directories =
         new BlazeDirectories(outputBase, outputBase, rootDirectory, analysisMock.getProductName());
+    PackageFactory.BuilderForTesting packageFactoryBuilder =
+        analysisMock.getPackageFactoryBuilderForTesting();
+    if (!doPackageLoadingChecks) {
+      packageFactoryBuilder.disableChecks();
+    }
     skyframeExecutor =
         SequencedSkyframeExecutor.create(
-            analysisMock
-                .getPackageFactoryForTesting()
-                .create(ruleClassProvider, scratch.getFileSystem()),
+            packageFactoryBuilder.build(ruleClassProvider, scratch.getFileSystem()),
             directories,
             null, /* BinTools */
             null, /* workspaceStatusActionFactory */
@@ -314,62 +321,6 @@ public class PackageCacheTest extends FoundationTestCase {
   }
 
   @Test
-  public void testPackageInErrorReloadedWhenFixed() throws Exception {
-    reporter.removeHandler(failFastHandler);
-    Path build = scratch.file("a/BUILD", "cc_library(name='a', feet='stinky')");
-    build.setLastModifiedTime(1);
-    Package a1 = getPackage("a");
-    assertTrue(a1.containsErrors());
-    assertContainsEvent("//a:a: no such attribute 'feet'");
-
-    eventCollector.clear();
-    build.delete();
-    build = scratch.file("a/BUILD", "cc_library(name='a', srcs=['a.cc'])");
-    build.setLastModifiedTime(2);
-    invalidatePackages();
-    Package a2 = getPackage("a");
-    assertNotSame(a1, a2);
-    assertFalse(a2.containsErrors());
-    assertNoEvents();
-  }
-
-  @Test
-  public void testModifiedBuildFileCausesReloadAfterSync() throws Exception {
-    Path path = scratch.file("pkg/BUILD",
-                             "cc_library(name = 'foo')");
-    path.setLastModifiedTime(1000);
-
-    Package oldPkg = getPackage("pkg");
-    // modify BUILD file (and change its timestamp)
-    path.delete();
-    scratch.file("pkg/BUILD", "cc_library(name = 'bar')");
-    path.setLastModifiedTime(999); // earlier; mtime doesn't have to advance
-    assertSame(oldPkg, getPackage("pkg")); // change not yet visible
-
-    invalidatePackages();
-
-    Package newPkg = getPackage("pkg");
-    assertNotSame(oldPkg, newPkg);
-    assertNotNull(newPkg.getTarget("bar"));
-  }
-
-  @Test
-  public void testTouchedBuildFileCausesReloadAfterSync() throws Exception {
-    Path path = scratch.file("pkg/BUILD",
-                             "cc_library(name = 'foo')");
-    path.setLastModifiedTime(1000);
-
-    Package oldPkg = getPackage("pkg");
-    path.setLastModifiedTime(1001);
-    assertSame(oldPkg, getPackage("pkg")); // change not yet visible
-
-    invalidatePackages();
-
-    Package newPkg = getPackage("pkg");
-    assertNotSame(oldPkg, newPkg);
-  }
-
-  @Test
   public void testMovedBuildFileCausesReloadAfterSync() throws Exception {
     Path buildFile1 = scratch.file("pkg/BUILD",
                                   "cc_library(name = 'foo')");
@@ -541,6 +492,8 @@ public class PackageCacheTest extends FoundationTestCase {
 
   @Test
   public void testDeletedPackages() throws Exception {
+    // PackageLoader doesn't support --deleted_packages.
+    initializeSkyframeExecutor(/*doPackageLoadingChecks=*/ false);
     reporter.removeHandler(failFastHandler);
     setUpCacheWithTwoRootLocator();
     createBuildFile(rootDir1, "c", "d/x");

@@ -140,17 +140,17 @@ public final class RuleConfiguredTargetBuilder {
     return new RuleConfiguredTarget(
         ruleContext,
         providers,
-        new SkylarkProviders(skylarkProviders.build(), skylarkDeclaredProviders.build()));
+        skylarkProviders.build(), skylarkDeclaredProviders.build());
   }
 
   /** Adds skylark providers from a skylark provider registry, and checks for collisions. */
   private void addRegisteredProvidersToSkylarkProviders(TransitiveInfoProviderMap providers) {
     Map<String, Object> nativeSkylarkProviders = new HashMap<>();
-    for (Map.Entry<Class<? extends TransitiveInfoProvider>, TransitiveInfoProvider> entry :
-        providers.entries()) {
-      if (ruleContext.getSkylarkProviderRegistry().containsValue(entry.getKey())) {
-        String skylarkName = ruleContext.getSkylarkProviderRegistry().inverse().get(entry.getKey());
-        nativeSkylarkProviders.put(skylarkName, entry.getValue());
+    for (int i = 0; i < providers.getProviderCount(); ++i) {
+      Class<? extends TransitiveInfoProvider> providerClass = providers.getProviderClassAt(i);
+      if (ruleContext.getSkylarkProviderRegistry().containsValue(providerClass)) {
+        String skylarkName = ruleContext.getSkylarkProviderRegistry().inverse().get(providerClass);
+        nativeSkylarkProviders.put(skylarkName, providers.getProviderAt(i));
       }
     }
     try {
@@ -161,16 +161,16 @@ public final class RuleConfiguredTargetBuilder {
   }
 
   /**
-   * Like getFilesToBuild(), except that it also includes the runfiles middleman, if any.
-   * Middlemen are expanded in the SpawnStrategy or by the Distributor.
+   * Like getFilesToBuild(), except that it also includes the runfiles middleman, if any. Middlemen
+   * are expanded in the SpawnStrategy or by the Distributor.
    */
-  private ImmutableList<Artifact> getFilesToRun(
+  private NestedSet<Artifact> getFilesToRun(
       RunfilesSupport runfilesSupport, NestedSet<Artifact> filesToBuild) {
     if (runfilesSupport == null) {
-      return ImmutableList.copyOf(filesToBuild);
+      return filesToBuild;
     } else {
-      ImmutableList.Builder<Artifact> allFilesToBuild = ImmutableList.builder();
-      allFilesToBuild.addAll(filesToBuild);
+      NestedSetBuilder<Artifact> allFilesToBuild = NestedSetBuilder.stableOrder();
+      allFilesToBuild.addTransitive(filesToBuild);
       allFilesToBuild.add(runfilesSupport.getRunfilesMiddleman());
       return allFilesToBuild.build();
     }

@@ -70,6 +70,7 @@
 
 using blaze_util::die;
 using blaze_util::pdie;
+using blaze_util::PrintWarning;
 
 namespace blaze {
 
@@ -530,8 +531,13 @@ static void AddLoggingArgs(vector<string> *args) {
                     ToString(globals->extract_data_time));
   }
   if (globals->restart_reason != NO_RESTART) {
-    const char *reasons[] = {"no_restart", "no_daemon", "new_version",
-                             "new_options"};
+    const char *reasons[] = {"no_restart",
+                             "no_daemon",
+                             "new_version",
+                             "new_options",
+                             "pid_file_but_no_server",
+                             "server_vanished",
+                             "server_unresponsive"};
     args->push_back(string("--restart_reason=") +
                     reasons[globals->restart_reason]);
   }
@@ -585,8 +591,7 @@ static void VerifyJavaVersionAndSetJvm() {
   globals->jvm_path = exe;
 }
 
-// Starts the Blaze server.  Returns a readable fd connected to the server.
-// This is currently used only to detect liveness.
+// Starts the Blaze server.
 static void StartServer(const WorkspaceLayout *workspace_layout,
                         BlazeServerStartup **server_startup) {
   vector<string> jvm_args_vector = GetArgumentArray();
@@ -641,13 +646,13 @@ static void StartStandalone(const WorkspaceLayout *workspace_layout,
   if (!command_arguments.empty() && command == "shutdown") {
     string product = globals->options->product_name;
     blaze_util::ToLower(&product);
-    fprintf(stderr,
-            "WARNING: Running command \"shutdown\" in batch mode.  Batch mode "
-            "is triggered\nwhen not running %s within a workspace. If you "
-            "intend to shutdown an\nexisting %s server, run \"%s "
-            "shutdown\" from the directory where\nit was started.\n",
-            globals->options->product_name.c_str(),
-            globals->options->product_name.c_str(), product.c_str());
+    PrintWarning(
+        "Running command \"shutdown\" in batch mode.  Batch mode "
+        "is triggered\nwhen not running %s within a workspace. If you "
+        "intend to shutdown an\nexisting %s server, run \"%s "
+        "shutdown\" from the directory where\nit was started.",
+        globals->options->product_name.c_str(),
+        globals->options->product_name.c_str(), product.c_str());
   }
   vector<string> jvm_args_vector = GetArgumentArray();
   if (command != "") {
@@ -700,6 +705,12 @@ static int GetServerPid(const string &server_dir) {
   return result;
 }
 
+static void SetRestartReasonIfNotSet(RestartReason restart_reason) {
+  if (globals->restart_reason == NO_RESTART) {
+    globals->restart_reason = restart_reason;
+  }
+}
+
 // Starts up a new server and connects to it. Exits if it didn't work not.
 static void StartServerAndConnect(const WorkspaceLayout *workspace_layout,
                                   BlazeServer *server) {
@@ -713,15 +724,6 @@ static void StartServerAndConnect(const WorkspaceLayout *workspace_layout,
          "server directory '%s' could not be created", server_dir.c_str());
   }
 
-  // TODO(laszlocsomor) 2016-11-21: remove `pid_symlink` and the `remove` call
-  // after 2017-05-01 (~half a year from writing this comment). By that time old
-  // Bazel clients that used to write PID symlinks will probably no longer be in
-  // use.
-  // Until then, defensively delete old PID symlinks that older clients may have
-  // left behind.
-  string pid_symlink = blaze_util::JoinPath(server_dir, kServerPidSymlink);
-  remove(pid_symlink.c_str());
-
   // If we couldn't connect to the server check if there is still a PID file
   // and if so, kill the server that wrote it. This can happen e.g. if the
   // server is in a GC pause and therefore cannot respond to ping requests and
@@ -730,10 +732,16 @@ static void StartServerAndConnect(const WorkspaceLayout *workspace_layout,
   int server_pid = GetServerPid(server_dir);
   if (server_pid > 0) {
     if (VerifyServerProcess(server_pid, globals->options->output_base,
-                            globals->options->install_base) &&
-        KillServerProcess(server_pid)) {
-      fprintf(stderr, "Killed non-responsive server process (pid=%d)\n",
-              server_pid);
+                            globals->options->install_base)) {
+      if (KillServerProcess(server_pid)) {
+        fprintf(stderr, "Killed non-responsive server process (pid=%d)\n",
+                server_pid);
+        SetRestartReasonIfNotSet(SERVER_UNRESPONSIVE);
+      } else {
+        SetRestartReasonIfNotSet(SERVER_VANISHED);
+      }
+    } else {
+      SetRestartReasonIfNotSet(PID_FILE_BUT_NO_SERVER);
     }
   }
 
@@ -1042,10 +1050,10 @@ static void KillRunningServerIfDifferentStartupOptions(BlazeServer *server) {
   // mortal coil.
   if (ServerNeedsToBeKilled(arguments, GetArgumentArray())) {
     globals->restart_reason = NEW_OPTIONS;
-    fprintf(stderr,
-            "WARNING: Running %s server needs to be killed, because the "
-            "startup options are different.\n",
-            globals->options->product_name.c_str());
+    PrintWarning(
+        "Running %s server needs to be killed, because the "
+        "startup options are different.",
+        globals->options->product_name.c_str());
     server->KillRunningServer();
   }
 }
@@ -1233,7 +1241,7 @@ static void ComputeBaseDirectories(const WorkspaceLayout *workspace_layout,
 
 static void CheckEnvironment() {
   if (!blaze::GetEnv("http_proxy").empty()) {
-    fprintf(stderr, "Warning: ignoring http_proxy in environment.\n");
+    PrintWarning("ignoring http_proxy in environment.");
     blaze::UnsetEnv("http_proxy");
   }
 
@@ -1242,18 +1250,18 @@ static void CheckEnvironment() {
     // specified, the JVM fails to create threads.  See thread_stack_regtest.
     // This is also provoked by LD_LIBRARY_PATH=/usr/lib/debug,
     // or anything else that causes the JVM to use LinuxThreads.
-    fprintf(stderr, "Warning: ignoring LD_ASSUME_KERNEL in environment.\n");
+    PrintWarning("ignoring LD_ASSUME_KERNEL in environment.");
     blaze::UnsetEnv("LD_ASSUME_KERNEL");
   }
 
   if (!blaze::GetEnv("LD_PRELOAD").empty()) {
-    fprintf(stderr, "Warning: ignoring LD_PRELOAD in environment.\n");
+    PrintWarning("ignoring LD_PRELOAD in environment.");
     blaze::UnsetEnv("LD_PRELOAD");
   }
 
   if (!blaze::GetEnv("_JAVA_OPTIONS").empty()) {
     // This would override --host_jvm_args
-    fprintf(stderr, "Warning: ignoring _JAVA_OPTIONS in environment.\n");
+    PrintWarning("ignoring _JAVA_OPTIONS in environment.");
     blaze::UnsetEnv("_JAVA_OPTIONS");
   }
 

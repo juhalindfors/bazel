@@ -126,6 +126,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
   protected MockToolsConfig mockToolsConfig;
 
   protected AnalysisMock analysisMock;
+  protected BuildOptions buildOptions;
   private OptionsParser optionsParser;
   protected PackageManager packageManager;
   private LoadingPhaseRunner loadingPhaseRunner;
@@ -171,8 +172,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
             ruleClassProvider.getConfigurationFragments()));
     PackageFactory pkgFactory =
         analysisMock
-            .getPackageFactoryForTesting()
-            .create(ruleClassProvider, scratch.getFileSystem());
+            .getPackageFactoryBuilderForTesting()
+            .build(ruleClassProvider, scratch.getFileSystem());
     BinTools binTools = BinTools.forUnitTesting(directories, analysisMock.getEmbeddedTools());
     skyframeExecutor =
         SequencedSkyframeExecutor.create(
@@ -246,6 +247,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
 
     InvocationPolicyEnforcer optionsPolicyEnforcer = analysisMock.getInvocationPolicyEnforcer();
     optionsPolicyEnforcer.enforce(optionsParser);
+
+    buildOptions = ruleClassProvider.createBuildOptions(optionsParser);
   }
 
   protected FlagBuilder defaultFlags() {
@@ -320,8 +323,6 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     BuildView.Options viewOptions = optionsParser.getOptions(BuildView.Options.class);
     viewOptions.keepGoing = flags.contains(Flag.KEEP_GOING);
     viewOptions.loadingPhaseThreads = LOADING_PHASE_THREADS;
-
-    BuildOptions buildOptions = ruleClassProvider.createBuildOptions(optionsParser);
 
     PackageCacheOptions packageCacheOptions = optionsParser.getOptions(PackageCacheOptions.class);
     PathPackageLocator pathPackageLocator = PathPackageLocator.create(

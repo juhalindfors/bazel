@@ -13,7 +13,10 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.cpp;
 
+import com.google.common.base.Joiner;
+import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
@@ -21,6 +24,7 @@ import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.FileProvider;
+import com.google.devtools.build.lib.analysis.MakeVariableSupplier;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTarget.Mode;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
@@ -32,6 +36,7 @@ import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.rules.apple.Platform;
 import com.google.devtools.build.lib.rules.cpp.CcLibraryHelper.SourceCategory;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
+import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.Variables;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.DynamicMode;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.HeadersCheckingMode;
 import com.google.devtools.build.lib.rules.test.InstrumentedFilesCollector;
@@ -50,6 +55,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import javax.annotation.Nullable;
 
 /**
  * Common parts of the implementation of cc rules.
@@ -75,7 +81,7 @@ public final class CcCommon {
       }
     }
   };
-    
+
   /** Features we request to enable unless a rule explicitly doesn't support them. */
   private static final ImmutableSet<String> DEFAULT_FEATURES =
       ImmutableSet.of(
@@ -89,10 +95,11 @@ public final class CcCommon {
           CppRuleClasses.PIC,
           CppRuleClasses.PER_OBJECT_DEBUG_INFO,
           CppRuleClasses.PREPROCESSOR_DEFINES);
+  public static final String CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME = ":cc_toolchain";
 
   /** C++ configuration */
   private final CppConfiguration cppConfiguration;
-  
+
   private final RuleContext ruleContext;
 
   private final CcToolchainProvider ccToolchain;
@@ -103,9 +110,11 @@ public final class CcCommon {
     this.ruleContext = ruleContext;
     this.cppConfiguration = ruleContext.getFragment(CppConfiguration.class);
     this.ccToolchain =
-        Preconditions.checkNotNull(CppHelper.getToolchain(ruleContext, ":cc_toolchain"));
+        Preconditions.checkNotNull(
+            CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext));
     this.fdoSupport =
-        Preconditions.checkNotNull(CppHelper.getFdoSupport(ruleContext, ":cc_toolchain"));
+        Preconditions.checkNotNull(
+            CppHelper.getFdoSupportUsingDefaultCcToolchainAttribute(ruleContext));
   }
 
   /**
@@ -126,12 +135,12 @@ public final class CcCommon {
         CppHelper.expandAttribute(ruleContext, result, "linkopts", linkopt, true);
       }
     }
-    
+
     if (Platform.isApplePlatform(cppConfiguration.getTargetCpu()) && result.contains("-static")) {
       ruleContext.attributeError(
           "linkopts", "Apple builds do not support statically linked binaries");
     }
-    
+
     return ImmutableList.copyOf(result);
   }
 
@@ -271,7 +280,7 @@ public final class CcCommon {
         }
       }
     }
-    
+
     ImmutableList.Builder<Pair<Artifact, Label>> result = ImmutableList.builder();
     for (Map.Entry<Artifact, Label> entry : map.entrySet()) {
       result.add(Pair.of(entry.getKey(), entry.getValue()));
@@ -300,6 +309,62 @@ public final class CcCommon {
    */
   public List<Pair<Artifact, Label>> getHeaders() {
     return getHeaders(ruleContext);
+  }
+
+  /**
+   * Supply CC_FLAGS Make variable value computed from FeatureConfiguration. Appends them to
+   * original CC_FLAGS, so FeatureConfiguration can override legacy values.
+   */
+  public static class CcFlagsSupplier implements MakeVariableSupplier {
+
+    private final RuleContext ruleContext;
+
+    public CcFlagsSupplier(RuleContext ruleContext) {
+      this.ruleContext = Preconditions.checkNotNull(ruleContext);
+    }
+
+    @Override
+    @Nullable
+    public String getMakeVariable(String variableName) {
+      if (!variableName.equals(CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME)) {
+        return null;
+      }
+
+      CcToolchainProvider toolchain =
+          CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext);
+      FeatureConfiguration featureConfiguration =
+          CcCommon.configureFeatures(ruleContext, toolchain);
+      if (!featureConfiguration.actionIsConfigured(
+          CppCompileAction.CC_FLAGS_MAKE_VARIABLE_ACTION_NAME)) {
+        return null;
+      }
+
+      Variables buildVariables = new Variables.Builder()
+          .addAllStringVariables(toolchain.getBuildVariables())
+          .build();
+      String toolchainCcFlags =
+          Joiner.on(" ")
+              .join(
+                  featureConfiguration.getCommandLine(
+                      CppCompileAction.CC_FLAGS_MAKE_VARIABLE_ACTION_NAME, buildVariables));
+
+      ImmutableMap<String, String> currentMakeVariables =
+          ruleContext.getMakeVariables(ImmutableList.of(CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME));
+      Preconditions.checkArgument(
+          currentMakeVariables.containsKey(CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME));
+
+      return FluentIterable.of(
+              currentMakeVariables.get(CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME))
+          .append(toolchainCcFlags)
+          .join(Joiner.on(" "));
+    }
+
+    @Override
+    public ImmutableMap<String, String> getAllMakeVariables() {
+      return ImmutableMap.of(
+          CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME,
+          getMakeVariable(CppConfiguration.CC_FLAGS_MAKE_VARIABLE_NAME));
+    }
   }
 
   private static ImmutableList<String> getPackageCopts(RuleContext ruleContext) {
@@ -574,16 +639,20 @@ public final class CcCommon {
         toolchain.getFeatures().getFeatureConfiguration(requestedFeatures.build());
     for (String feature : unsupportedFeatures) {
       if (configuration.isEnabled(feature)) {
-        ruleContext.ruleError("The C++ toolchain '"
-            + ruleContext.getPrerequisite(":cc_toolchain", Mode.TARGET).getLabel()
-            + "' unconditionally implies feature '" + feature
-            + "', which is unsupported by this rule. "
-            + "This is most likely a misconfiguration in the C++ toolchain.");
+        ruleContext.ruleError(
+            "The C++ toolchain '"
+                + ruleContext
+                    .getPrerequisite(CcToolchain.CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME, Mode.TARGET)
+                    .getLabel()
+                + "' unconditionally implies feature '"
+                + feature
+                + "', which is unsupported by this rule. "
+                + "This is most likely a misconfiguration in the C++ toolchain.");
       }
     }
-    return configuration; 
+    return configuration;
   }
- 
+
   /**
    * Creates a feature configuration for a given rule.
    *

@@ -119,8 +119,10 @@ function test_basic() {
   # - a completed target explicity requested should be reported
   # - after success the stream should close naturally, without any
   #   reports about aborted events.
-  # - no events occur in an unsolicited way
   # - the command line is reported
+  # - the target_kind is reported
+  # - for single-configuration builds, there is precisely one configuration
+  #   event reported
   bazel test --experimental_build_event_text_file=$TEST_log pkg:true \
     || fail "bazel test failed"
   expect_log 'pkg:true'
@@ -133,6 +135,7 @@ function test_basic() {
   expect_log 'SUCCESS'
   expect_log 'finish_time'
   expect_not_log 'aborted'
+  expect_log_once '^configuration '
   # target kind for the sh_test
   expect_log 'target_kind:.*sh'
 }
@@ -329,9 +332,23 @@ function test_multiple_transports() {
     bazel test \
       --experimental_build_event_text_file=${outdir}/test_multiple_transports.txt \
       --experimental_build_event_binary_file=${outdir}/test_multiple_transports.bin \
+      --experimental_build_event_json_file=${outdir}/test_multiple_transports.json \
       pkg:suite || fail "bazel test failed"
   [ -f ${outdir}/test_multiple_transports.txt ] || fail "Missing expected file test_multiple_transports.txt"
   [ -f ${outdir}/test_multiple_transports.bin ] || fail "Missing expected file test_multiple_transports.bin"
+  [ -f ${outdir}/test_multiple_transports.json ] || fail "Missing expected file test_multiple_transports.bin"
+}
+
+function test_basic_json() {
+  # Verify that the json transport writes json files
+  bazel test --experimental_build_event_json_file=$TEST_log pkg:true \
+    || fail "bazel test failed"
+  # check for some typical fragments that would be encoded differently in the
+  # proto text format.
+  expect_log '"started"'
+  expect_log '"id"'
+  expect_log '"children" *: *\['
+  expect_log '"overallSuccess": true'
 }
 
 function test_root_cause_early() {

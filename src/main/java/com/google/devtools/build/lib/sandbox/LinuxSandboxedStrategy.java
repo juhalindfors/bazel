@@ -27,11 +27,13 @@ import com.google.devtools.build.lib.actions.SpawnActionContext;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
+import com.google.devtools.build.lib.exec.SpawnInputExpander;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
 import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.build.lib.vfs.Symlinks;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
@@ -44,30 +46,66 @@ import java.util.concurrent.atomic.AtomicReference;
   contextType = SpawnActionContext.class
 )
 public class LinuxSandboxedStrategy extends SandboxStrategy {
-  public static boolean isSupported(CommandEnvironment env) {
-    return LinuxSandboxRunner.isSupported(env);
+
+  public static boolean isSupported(CommandEnvironment cmdEnv) {
+    return LinuxSandboxRunner.isSupported(cmdEnv);
   }
 
   private final SandboxOptions sandboxOptions;
   private final BlazeDirectories blazeDirs;
   private final Path execRoot;
   private final boolean verboseFailures;
+  private final SpawnInputExpander spawnInputExpander;
+  private final Path inaccessibleHelperFile;
+  private final Path inaccessibleHelperDir;
 
-  LinuxSandboxedStrategy(
+  private LinuxSandboxedStrategy(
+      CommandEnvironment cmdEnv,
       BuildRequest buildRequest,
-      BlazeDirectories blazeDirs,
       Path sandboxBase,
-      boolean verboseFailures) {
+      boolean verboseFailures,
+      Path inaccessibleHelperFile,
+      Path inaccessibleHelperDir) {
     super(
+        cmdEnv,
         buildRequest,
-        blazeDirs,
         sandboxBase,
         verboseFailures,
         buildRequest.getOptions(SandboxOptions.class));
     this.sandboxOptions = buildRequest.getOptions(SandboxOptions.class);
-    this.blazeDirs = blazeDirs;
-    this.execRoot = blazeDirs.getExecRoot();
+    this.blazeDirs = cmdEnv.getDirectories();
+    this.execRoot = cmdEnv.getExecRoot();
     this.verboseFailures = verboseFailures;
+    this.spawnInputExpander = new SpawnInputExpander(false);
+    this.inaccessibleHelperFile = inaccessibleHelperFile;
+    this.inaccessibleHelperDir = inaccessibleHelperDir;
+  }
+
+  static LinuxSandboxedStrategy create(
+      CommandEnvironment cmdEnv,
+      BuildRequest buildRequest,
+      Path sandboxBase,
+      boolean verboseFailures)
+      throws IOException {
+    Path inaccessibleHelperFile = sandboxBase.getRelative("inaccessibleHelperFile");
+    FileSystemUtils.touchFile(inaccessibleHelperFile);
+    inaccessibleHelperFile.setReadable(false);
+    inaccessibleHelperFile.setWritable(false);
+    inaccessibleHelperFile.setExecutable(false);
+
+    Path inaccessibleHelperDir = sandboxBase.getRelative("inaccessibleHelperDir");
+    inaccessibleHelperDir.createDirectory();
+    inaccessibleHelperDir.setReadable(false);
+    inaccessibleHelperDir.setWritable(false);
+    inaccessibleHelperDir.setExecutable(false);
+
+    return new LinuxSandboxedStrategy(
+        cmdEnv,
+        buildRequest,
+        sandboxBase,
+        verboseFailures,
+        inaccessibleHelperFile,
+        inaccessibleHelperDir);
   }
 
   @Override
@@ -90,11 +128,12 @@ public class LinuxSandboxedStrategy extends SandboxStrategy {
     SymlinkedExecRoot symlinkedExecRoot = new SymlinkedExecRoot(sandboxExecRoot);
     ImmutableSet<PathFragment> outputs = SandboxHelpers.getOutputFiles(spawn);
     symlinkedExecRoot.createFileSystem(
-        getMounts(spawn, actionExecutionContext), outputs, writableDirs);
+        SandboxHelpers.getInputFiles(spawnInputExpander, execRoot, spawn, actionExecutionContext),
+        outputs,
+        writableDirs);
 
     SandboxRunner runner =
         new LinuxSandboxRunner(
-            execRoot,
             sandboxExecRoot,
             writableDirs,
             getTmpfsPaths(),
@@ -170,6 +209,13 @@ public class LinuxSandboxedStrategy extends SandboxStrategy {
       } catch (IllegalArgumentException e) {
         throw new UserExecException(
             String.format("Error occurred when analyzing bind mount pairs. %s", e.getMessage()));
+      }
+    }
+    for (Path inaccessiblePath : getInaccessiblePaths()) {
+      if (inaccessiblePath.isDirectory(Symlinks.NOFOLLOW)) {
+        bindMounts.put(inaccessiblePath, inaccessibleHelperDir);
+      } else {
+        bindMounts.put(inaccessiblePath, inaccessibleHelperFile);
       }
     }
     validateBindMounts(bindMounts);

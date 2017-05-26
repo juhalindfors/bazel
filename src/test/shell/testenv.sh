@@ -292,12 +292,10 @@ function setup_android_sdk_support() {
   for i in $SDK_SRCDIR/*; do
     ln -s "$i" "$ANDROID_SDK/$(basename $i)"
   done
-  ANDROID_SDK_API_LEVEL=$(ls $SDK_SRCDIR/platforms | cut -d '-' -f 2 | sort -n | tail -1)
 cat >> WORKSPACE <<EOF
 android_sdk_repository(
     name = "androidsdk",
     path = "$ANDROID_SDK",
-    api_level = $ANDROID_SDK_API_LEVEL,
 )
 EOF
 }
@@ -311,12 +309,10 @@ function setup_android_ndk_support() {
       ln -s "$i" "$ANDROID_NDK/$(basename $i)"
     fi
   done
-  ANDROID_NDK_API_LEVEL=$(ls $NDK_SRCDIR/platforms | cut -d '-' -f 2 | sort -n | tail -1)
   cat >> WORKSPACE <<EOF
 android_ndk_repository(
     name = "androidndk",
     path = "$ANDROID_NDK",
-    api_level = $ANDROID_NDK_API_LEVEL,
 )
 EOF
 }
@@ -381,8 +377,8 @@ function create_new_workspace() {
 
   copy_tools_directory
 
-  [ -e third_party/java/jdk/langtools/javac-9-dev-r4023-1.jar ] \
-    || ln -s "${langtools_path}"  third_party/java/jdk/langtools/javac-9-dev-r4023-1.jar
+  [ -e third_party/java/jdk/langtools/javac-9-dev-r4023-2.jar ] \
+    || ln -s "${langtools_path}"  third_party/java/jdk/langtools/javac-9-dev-r4023-2.jar
 
   touch WORKSPACE
 }

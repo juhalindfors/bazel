@@ -13,7 +13,7 @@ filegroup(
 genrule(
     name = "langtools-copy",
     testonly = 1,
-    srcs = ["//third_party/java/jdk/langtools:javac_jar-9-dev-r4023-1"],
+    srcs = ["//third_party/java/jdk/langtools:javac_jar"],
     outs = ["langtools.jar"],
     cmd = "cp $< $@",
 )
@@ -39,7 +39,7 @@ filegroup(
         "//src/test/shell:testenv.sh",
         "//third_party:srcs",
         "//third_party/ijar",
-        "//third_party/java/jdk/langtools:test-srcs-9-dev-r4023-1",
+        "//third_party/java/jdk/langtools:test-srcs",
         "//tools:srcs",
         "@local_jdk//:bootclasspath",
         # TODO(cushon): migrate to extclasspath and delete
@@ -323,9 +323,9 @@ sh_test(
 )
 
 sh_test(
-    name = "cc_inc_library_test",
+    name = "cc_integration_test",
     size = "medium",
-    srcs = ["cc_inc_library_test.sh"],
+    srcs = ["cc_integration_test.sh"],
     data = [":test-deps"],
 )
 
