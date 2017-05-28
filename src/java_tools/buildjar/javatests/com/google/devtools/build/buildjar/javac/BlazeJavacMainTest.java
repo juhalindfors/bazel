@@ -29,6 +29,8 @@ import java.nio.file.Paths;
 import java.util.Locale;
 import javax.tools.Diagnostic;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 
 
 /**
@@ -36,6 +38,7 @@ import org.junit.Test;
  *
  * @author <a href = "http://www.github.com/juhalindfors">Juha Lindfors</a>
  */
+@RunWith(JUnit4.class)
 public class BlazeJavacMainTest {
 
   /* Copy & pasted from BazelJavaCompilerTest.
