@@ -42,7 +42,7 @@ import org.junit.runners.JUnit4;
 public class BlazeJavacMainTest {
 
   /* Copy & pasted from BazelJavaCompilerTest.
-     There should be a place to share test code utility functions? */
+     TODO(juhalindfors/bazel-team): Share test code utility functions. */
   private static Path getTmpDir() {
     String tmpdir = System.getenv("TEST_TMPDIR");
 
