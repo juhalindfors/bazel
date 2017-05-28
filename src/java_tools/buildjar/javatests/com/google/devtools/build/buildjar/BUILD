@@ -1,7 +1,6 @@
 filegroup(
     name = "srcs",
     srcs = glob(["**"]) + [
-        # include sub-package test sources...
         "//src/java_tools/buildjar/javatests/com/google/devtools/build/buildjar/javac:srcs",
         "//src/java_tools/buildjar/javatests/com/google/devtools/build/buildjar/resourcejar:srcs",
     ],
