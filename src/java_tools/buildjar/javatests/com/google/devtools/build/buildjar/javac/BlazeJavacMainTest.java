@@ -76,14 +76,12 @@ public class BlazeJavacMainTest {
     final int INVALID_UTF8_BYTEVALUE = 0xF6;
 
     // create temp Java source file...
-
     File file = File.createTempFile("bzltest", ".java");
     BufferedOutputStream bout = new BufferedOutputStream(new FileOutputStream(file));
     bout.write(createInvalidUTF8Encoding(INVALID_UTF8_BYTEVALUE));
     bout.close();
 
     // run source through the compiler with UTF-8 encoding -- should result in an error...
-
     String decoderCharsetName = StandardCharsets.UTF_8.name();
 
     BlazeJavacResult result = BlazeJavacMain.compile(
@@ -95,7 +93,6 @@ public class BlazeJavacMainTest {
     assertFalse(result.isOk());
 
     // Our source is very simple so assume first diagnostic contains the error...
-
     FormattedDiagnostic firstDiagnostic = result.diagnostics().get(0);
     String formattedMessage = firstDiagnostic.getFormatted()
         .toLowerCase(Locale.ENGLISH);
@@ -114,7 +111,6 @@ public class BlazeJavacMainTest {
         formattedMessage.contains(expectedMsgContent));
 
     // Compile again, this time with the correct character encoding...
-
     result = BlazeJavacMain.compile(
         createTestArgs(
             Paths.get(file.toURI()),
