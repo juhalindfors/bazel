@@ -87,7 +87,10 @@ public class BlazeJavacMainTest {
     String decoderCharsetName = StandardCharsets.UTF_8.name();
 
     BlazeJavacResult result = BlazeJavacMain.compile(
-        createTestArgs(Paths.get(file.toURI()), Option.ENCODING.getPrimaryName(), decoderCharsetName));
+        createTestArgs(
+            Paths.get(file.toURI()),
+            Option.ENCODING.getPrimaryName(),
+            decoderCharsetName));
 
     assertFalse(result.isOk());
 
@@ -112,8 +115,11 @@ public class BlazeJavacMainTest {
 
     // Compile again, this time with the correct character encoding...
 
-    result = BlazeJavacMain.compile(createTestArgs(
-        Paths.get(file.toURI()), Option.ENCODING.getPrimaryName(), StandardCharsets.ISO_8859_1.name()));
+    result = BlazeJavacMain.compile(
+        createTestArgs(
+            Paths.get(file.toURI()),
+            Option.ENCODING.getPrimaryName(),
+            StandardCharsets.ISO_8859_1.name()));
 
     assertTrue(result.isOk());
   }
