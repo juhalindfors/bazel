@@ -19,7 +19,6 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.buildjar.javac.plugins.BlazeJavaCompilerPlugin;
 import com.sun.tools.javac.main.Option;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -28,7 +27,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Locale;
-import javax.annotation.processing.Processor;
 import javax.tools.Diagnostic;
 import org.junit.Test;
 
@@ -120,57 +118,12 @@ public class BlazeJavacMainTest {
   /* Helper to create Bazel javac argument instances for testing... */
   private BlazeJavacArguments createTestArgs(final Path sourceFile, final String... args) {
 
-    return new BlazeJavacArguments() {
-      @Override
-      public ImmutableList<Path> sourceFiles() {
-        return ImmutableList.of(sourceFile);
-      }
-
-      @Override
-      public ImmutableList<String> javacOptions() {
-        return ImmutableList.copyOf(args);
-      }
-
-      @Override
-      public ImmutableList<Path> classPath() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<Path> bootClassPath() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<Path> sourcePath() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<Path> processorPath() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<BlazeJavaCompilerPlugin> plugins() {
-        return ImmutableList.of();
-      }
-
-      @Override
-      public ImmutableList<Processor> processors() {
-        return null;
-      }
-
-      @Override
-      public Path classOutput() {
-        return getTmpDir();
-      }
-
-      @Override
-      public Path sourceOutput() {
-        return null;
-      }
-    };
+    return BlazeJavacArguments
+        .builder()
+        .sourceFiles(ImmutableList.of(sourceFile))
+        .javacOptions(ImmutableList.copyOf(args))
+        .classOutput(getTmpDir())
+        .build();
   }
 
   /* Creates a byte representation of a test Java source file... */
