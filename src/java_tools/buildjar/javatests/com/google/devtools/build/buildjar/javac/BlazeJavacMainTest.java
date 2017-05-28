@@ -72,7 +72,8 @@ public class BlazeJavacMainTest {
   @Test
   public void testNonUTF8EncodedCompile() throws Exception {
 
-    final int INVALID_UTF8_BYTEVALUE = 0xF6;                // maps to character 'ö' in ISO-8859-1
+    // maps to character 'ö' in ISO-8859-1
+    final int INVALID_UTF8_BYTEVALUE = 0xF6;
 
     // create temp Java source file...
 
