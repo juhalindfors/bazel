@@ -25,6 +25,7 @@ import com.sun.tools.javac.api.ClientCodeWrapper.Trusted;
 import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.main.JavaCompiler;
+import com.sun.tools.javac.main.Option;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.PropagatedException;
 import java.io.IOError;
@@ -33,6 +34,8 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
@@ -81,7 +84,15 @@ public class BlazeJavacMain {
     Listener diagnostics = new Listener(context);
     BlazeJavaCompiler compiler;
 
-    try (JavacFileManager fileManager = new ClassloaderMaskingFileManager()) {
+    // Set default charset of javac's file manager to UTF-8. This is overridable if '-encoding'
+    // is present in javac arguments in which case the file manager's character set must be null.
+    Charset defaultCharset = StandardCharsets.UTF_8;
+
+    if (javacArguments.contains(Option.ENCODING.getPrimaryName())) {
+      defaultCharset = null;
+    }
+
+    try (JavacFileManager fileManager = new ClassloaderMaskingFileManager(defaultCharset)) {
       JavacTask task =
           JavacTool.create()
               .getTask(
@@ -192,15 +203,13 @@ public class BlazeJavacMain {
   @Trusted
   private static class ClassloaderMaskingFileManager extends JavacFileManager {
 
-    public ClassloaderMaskingFileManager() {
-
-      // Note: Do not set the charset on the file manager -- this prevents the encoding setting
-      //       from taking effect: the base class checks for encoding only if charset is null.
-      //       Instead trust the Bazel's default UTF-8 encoding to be specified in Bazel args.
-      //       Note that the default setting is important, otherwise the base class will fallback
-      //       to system default charset which varies from system to system...  [juhalindfors]
-
-      super(new Context(), false, null /* do not hard-code charset */);
+    /**
+     * @param defaultCharset Character set the file manager should use by default. If '-encoding'
+     *     option has been set in javac arguments and it is followed, this parameter value MUST
+     *     be null for the javac argument handling to set the encoding charset correctly.
+     */
+    public ClassloaderMaskingFileManager(Charset defaultCharset) {
+      super(new Context(), false, defaultCharset);
     }
 
     @Override
