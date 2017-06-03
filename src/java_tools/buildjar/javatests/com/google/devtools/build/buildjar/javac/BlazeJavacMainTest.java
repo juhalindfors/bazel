@@ -14,20 +14,21 @@
 
 package com.google.devtools.build.buildjar.javac;
 
+import static java.nio.charset.StandardCharsets.UTF_16;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
+import com.sun.tools.javac.file.JavacFileManager;
 import com.sun.tools.javac.main.Option;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.CharsetDecoder;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Locale;
-import javax.tools.Diagnostic;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -60,66 +61,64 @@ public class BlazeJavacMainTest {
 
 
   /**
-   * Tests passing -encoding argument from Bazel javac wrapper into JDK JavacTool implementation.
-   * This test should prevent regression on issue #2926 where encoding argument was ignored by
-   * the file manager implementation. <p>
+   * Test to ensure the default UTF-8 source encoding is used and that it can be overridden
+   * with '-encoding' javac argument. <p>
    *
-   * Test uses a temporary source file with invalid UTF-8 encoding (the source is valid ISO-8859-1
-   * byte encoding though) and checks the compiler result on incorrect and correct encoding setting.
+   * Test uses a temporary source files with UTF-8 and UTF-16 encodings and attempts to compile
+   * using default source encoding (no explicit '-encoding' option present, should fail due
+   * to UTF-8 default) and then compiles again by setting the correct UTF-16 encoding option
+   * (should succeed).
    *
    * @throws Exception if test fails
    */
   @Test
-  public void testNonUTF8EncodedCompile() throws Exception {
+  public void testDefaultEncoding() throws Exception {
 
-    // maps to character 'ö' in ISO-8859-1
-    final int INVALID_UTF8_BYTEVALUE = 0xF6;
+    // Create temporary Java source files with different encodings...
+    File fileUTF8 = File.createTempFile("bzltest", ".java");
+    File fileUTF16 = File.createTempFile("bzltest", ".java");
+    String source = "class Test { }";
 
-    // create temp Java source file...
-    File file = File.createTempFile("bzltest", ".java");
-    BufferedOutputStream bout = new BufferedOutputStream(new FileOutputStream(file));
-    bout.write(createInvalidUTF8Encoding(INVALID_UTF8_BYTEVALUE));
-    bout.close();
+    try (BufferedOutputStream bout8 = new BufferedOutputStream(new FileOutputStream(fileUTF8));
+        BufferedOutputStream bout16 = new BufferedOutputStream(new FileOutputStream(fileUTF16))) {
 
-    // run source through the compiler with UTF-8 encoding -- should result in an error...
-    String decoderCharsetName = StandardCharsets.UTF_8.name();
+      bout8.write(source.getBytes(UTF_8));
+      bout16.write(source.getBytes(UTF_16));
+    }
 
-    BlazeJavacResult result = BlazeJavacMain.compile(
-        createTestArgs(
-            Paths.get(file.toURI()),
-            Option.ENCODING.getPrimaryName(),
-            decoderCharsetName));
+    Path utf8SourcePath = Paths.get(fileUTF8.toURI());
+    Path utf16SourcePath = Paths.get(fileUTF16.toURI());
 
+    // Run UTF-8 source through the compiler without explicit '-encoding' setting -- the decoder
+    // should use the default UTF-8 charset...
+    BlazeJavacResult result = BlazeJavacMain.compile(createTestArgs(utf8SourcePath));
+    assertTrue(result.isOk());
+
+    JavacFileManager mgr = (JavacFileManager) result.compiler().filemanager();
+    CharsetDecoder decoder = mgr.getDecoder(null /* should fall back to default charset */, true);
+    assertTrue(decoder.charset().equals(UTF_8));
+
+    // Run UTF-16 source through the compiler without explicit '-encoding' setting -- the decoder
+    // should use the default UTF-8 charset causing a failure...
+    result = BlazeJavacMain.compile(createTestArgs(utf16SourcePath));
     assertFalse(result.isOk());
 
-    // Our source is very simple so assume first diagnostic contains the error...
-    FormattedDiagnostic firstDiagnostic = result.diagnostics().get(0);
-    String formattedMessage = firstDiagnostic.getFormatted()
-        .toLowerCase(Locale.ENGLISH);
-    String expectedMsgContent = ("error: unmappable character (0x" +
-        Integer.toHexString(INVALID_UTF8_BYTEVALUE) +
-        ") for encoding " + decoderCharsetName)
-        .toLowerCase(Locale.ENGLISH);
+    mgr = (JavacFileManager) result.compiler().filemanager();
+    decoder = mgr.getDecoder(UTF_16.name() /* ignored and falls back to default charset */, true);
+    assertTrue(decoder.charset().equals(UTF_8));
 
-    assertTrue(
-        "Received: " + firstDiagnostic,
-        firstDiagnostic.getKind() == Diagnostic.Kind.ERROR);
-
-    // testing on the error message produced by tool -- brittle (and will it be localized?)...
-    assertTrue(
-        "Received: " + formattedMessage,
-        formattedMessage.contains(expectedMsgContent));
-
-    // Compile again, this time with the correct character encoding...
-    result = BlazeJavacMain.compile(
-        createTestArgs(
-            Paths.get(file.toURI()),
-            Option.ENCODING.getPrimaryName(),
-            StandardCharsets.ISO_8859_1.name()));
-
+    // Run UTF-16 source through the compiler *with* explicit '-encoding' setting -- the decoder
+    // should use UTF-16 charset and succeed...
+    result = BlazeJavacMain.compile(createTestArgs(
+        utf16SourcePath, Option.ENCODING.getPrimaryName(), UTF_16.name()));
     assertTrue(result.isOk());
-  }
 
+    mgr = (JavacFileManager) result.compiler().filemanager();
+    assertTrue(mgr.getEncodingName().equals(UTF_16.name()));
+
+    decoder = mgr.getDecoder(UTF_16.name(), true);
+    assertTrue(decoder.charset().equals(UTF_16));
+  }
 
   /* Helper to create Bazel javac argument instances for testing... */
   private BlazeJavacArguments createTestArgs(final Path sourceFile, final String... args) {
@@ -130,25 +129,6 @@ public class BlazeJavacMainTest {
         .javacOptions(ImmutableList.copyOf(args))
         .classOutput(getTmpDir())
         .build();
-  }
-
-  /* Creates a byte representation of a test Java source file... */
-  private byte[] createInvalidUTF8Encoding(int... invalidBytes) {
-
-    String sourceStart = "class Test { /* ";
-    String sourceEnd = " */ }";
-
-    byte[] textBytes = new byte[sourceStart.length() + sourceEnd.length() + 1];
-    System.arraycopy(sourceStart.getBytes(), 0, textBytes, 0, sourceStart.length());
-
-    for (int index = 0; index < invalidBytes.length; ++index) {
-      textBytes[sourceStart.length() + index] = (byte) invalidBytes[index];
-    }
-
-    System.arraycopy(sourceEnd.getBytes(), 0, textBytes,
-        sourceStart.length() + invalidBytes.length, sourceEnd.length());
-
-    return textBytes;
   }
 
 }

@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.buildjar.javac;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.devtools.build.buildjar.javac.plugins.BlazeJavaCompilerPlugin;
 import com.sun.tools.javac.comp.AttrContext;
 import com.sun.tools.javac.comp.CompileStates.CompileState;
@@ -23,6 +24,7 @@ import com.sun.tools.javac.util.Context;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
+import javax.tools.JavaFileManager;
 
 /**
  * An extended version of the javac compiler, providing support for composable static analyses via a
@@ -143,5 +145,10 @@ public class BlazeJavaCompiler extends JavaCompiler {
       }
     }
     return false;
+  }
+
+  @VisibleForTesting
+  protected JavaFileManager filemanager() {
+    return fileManager;
   }
 }
